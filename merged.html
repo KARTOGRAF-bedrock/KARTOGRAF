@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Объединение Ресурс Паков Minecraft Bedrock</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: auto;
+            text-align: center;
+        }
+        #fileInput {
+            margin: 20px 0;
+        }
+        #mergeButton {
+            width: 100%;
+            height: 40px;
+            background-color: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #mergeButton:hover {
+            background-color: #45a049;
+        }
+        #progressContainer {
+            display: none;
+            margin: 20px 0;
+        }
+        #progressBar {
+            width: 100%;
+            height: 30px;
+            background-color: #f3f3f3;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        #progressBarFill {
+            height: 100%;
+            width: 0;
+            background-color: #4caf50;
+            text-align: center;
+            color: white;
+            line-height: 30px;
+            transition: width 0.4s;
+        }
+        #logContainer {
+            display: none;
+            margin-top: 20px;
+        }
+        #log {
+            text-align: left;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .downloadLink {
+            display: block;
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #4caf50;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .downloadLink:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Объединение Ресурс Паков Minecraft Bedrock</h1>
+        <input type="file" id="fileInput" multiple accept=".zip,.mcpack">
+        <button id="mergeButton">ОБЪЕДИНИТЬ</button>
+        <div id="progressContainer">
+            <div id="progressBar">
+                <div id="progressBarFill">0%</div>
+            </div>
+        </div>
+        <div id="logContainer">
+            <div id="log"></div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/uuid/8.3.2/uuid.min.js"></script>
+    <script>
+        document.getElementById('mergeButton').addEventListener('click', async () => {
+            const files = document.getElementById('fileInput').files;
+            if (files.length < 2) {
+                alert('Необходимо выбрать минимум два файла.');
+                return;
+            }
+
+            document.getElementById('progressContainer').style.display = 'block';
+            document.getElementById('logContainer').style.display = 'block';
+            const progressBarFill = document.getElementById('progressBarFill');
+            const log = document.getElementById('log');
+            log.innerHTML = '';
+
+            try {
+                const startTime = Date.now();
+
+                const JSZip = await loadJSZip();
+                const mergedZip = new JSZip();
+                const existingFiles = new Map();
+                const fileConflicts = [];
+
+                let processedCount = 0;
+
+                for (const file of files) {
+                    const zip = await JSZip.loadAsync(file);
+                    let rootPath = await findRootPathWithManifest(zip);
+
+                    const filePromises = [];
+                    zip.forEach((relativePath, file) => {
+                        if (!relativePath.endsWith('manifest.json') && 
+                            !relativePath.endsWith('pack_icon.png')) {
+                            const newPath = relativePath.startsWith(rootPath) 
+                                ? relativePath.slice(rootPath.length) 
+                                : relativePath;
+                            filePromises.push(file.async('arraybuffer').then(content => {
+                                if (existingFiles.has(newPath)) {
+                                    if (Math.random() > 0.5) {
+                                        mergedZip.file(newPath, content);
+                                        fileConflicts.push({
+                                            kept: newPath,
+                                            discarded: existingFiles.get(newPath).path,
+                                            sourceArchive: file.name
+                                        });
+                                        existingFiles.set(newPath, { path: newPath, sourceArchive: file.name });
+                                    } else {
+                                        fileConflicts.push({
+                                            kept: existingFiles.get(newPath).path,
+                                            discarded: newPath,
+                                            sourceArchive: existingFiles.get(newPath).sourceArchive
+                                        });
+                                    }
+                                } else {
+                                    existingFiles.set(newPath, { path: newPath, sourceArchive: file.name });
+                                    mergedZip.file(newPath, content);
+                                }
+                            }));
+                        }
+                    });
+                    await Promise.all(filePromises);
+                    processedCount++;
+                    const progress = Math.round((processedCount / files.length) * 100);
+                    progressBarFill.style.width = `${progress}%`;
+                    progressBarFill.textContent = `${progress}%`;
+                }
+
+                // Добавление или обновление manifest.json
+                const randomNumber = Math.floor(100000 + Math.random() * 900000); 
+                const manifestTemplate = {
+                    "format_version": 1,
+                    "header": {
+                        "uuid": uuid.v4(),
+                        "name": `${randomNumber}-Сборка при помощи @kartograf`,
+                        "version": [0, 0, 1],
+                        "description": "@kartograf"
+                    },
+                    "modules": [
+                        {
+                            "description": "@kartograf",
+                            "version": [0, 0, 1],
+                            "uuid": uuid.v4(),
+                            "type": "resources"
+                        }
+                    ]
+                };
+
+                mergedZip.file('manifest.json', JSON.stringify(manifestTemplate, null, 2));
+
+                // Генерация pack_icon.png
+                const packIcon = await generatePackIcon(512, 512);
+                mergedZip.file('pack_icon.png', packIcon);
+
+                const mergedBlob = await mergedZip.generateAsync({ type: 'blob' });
+                const endTime = Date.now();
+                const timeTaken = ((endTime - startTime) / 1000).toFixed(2);
+
+                const zipLink = document.createElement('a');
+                zipLink.href = URL.createObjectURL(mergedBlob);
+                zipLink.download = `${randomNumber}-merged_resource_pack.zip`;
+                zipLink.textContent = 'Скачать объединенный ресурс пак (ZIP)';
+                zipLink.className = 'downloadLink';
+                log.appendChild(zipLink);
+
+                const mcpackLink = document.createElement('a');
+                mcpackLink.href = URL.createObjectURL(mergedBlob);
+                mcpackLink.download = `${randomNumber}-merged_resource_pack.mcpack`;
+                mcpackLink.textContent = 'Скачать объединенный ресурс пак (MCPACK)';
+                mcpackLink.className = 'downloadLink';
+                log.appendChild(mcpackLink);
+
+                log.innerHTML += `<p>Объединено: ${files.length} паков</p>`;
+                log.innerHTML += `<p>Время: ${timeTaken} секунд</p>`;
+
+                if (fileConflicts.length > 0) {
+                    log.innerHTML += '<h3>Конфликты файлов:</h3>';
+                    fileConflicts.forEach(conflict => {
+                        if (!conflict.kept.endsWith('/') && !conflict.discarded.endsWith('/')) {
+                            log.innerHTML += `<p>Файл "${conflict.discarded}" был заменен файлом "${conflict.kept}" (из архива "${conflict.sourceArchive}")</p>`;
+                        }
+                    });
+                }
+            } catch (error) {
+                log.innerHTML += `<p>Произошла ошибка: ${error.message}</p>`;
+            }
+        });
+
+        async function findRootPathWithManifest(zip) {
+            let rootPath = '';
+            const files = zip.file(/.*/);
+            for (const file of files) {
+                if (file.name === 'manifest.json') {
+                    return rootPath;
+                }
+            }
+            for (const file of files) {
+                if (file.name.endsWith('/manifest.json')) {
+                    rootPath = file.name.slice(0, file.name.lastIndexOf('/') + 1);
+                    return rootPath;
+                }
+            }
+            return null;
+        }
+
+        function generatePackIcon(width, height) {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+
+            // Заливка фона оранжевым цветом
+            ctx.fillStyle = '#FFA500'; // Оранжевый цвет
+            ctx.fillRect(0, 0, width, height);
+
+            // Рамка на тон ниже
+            ctx.strokeStyle = '#E59400'; // Оранжевый цвет на тон ниже
+            ctx.lineWidth = 20;
+            ctx.strokeRect(0, 0, width, height);
+
+            // Черная буква "K" по середине
+            ctx.fillStyle = '#000000'; // Черный цвет
+            ctx.font = 'bold 400px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('K', width / 2, height / 2);
+
+            return new Promise((resolve) => {
+                canvas.toBlob((blob) => {
+                    resolve(blob);
+                }, 'image/png');
+            });
+        }
+
+        async function loadJSZip() {
+            if (!window.JSZip) {
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js';
+                document.head.appendChild(script);
+                return new Promise((resolve) => {
+                    script.onload = () => resolve(window.JSZip);
+                });
+            }
+            return window.JSZip;
+        }
+    </script>
+</body>
+</html>

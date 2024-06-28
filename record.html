@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Создание ресурс-пака для Minecraft Bedrock</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 5px;
+        }
+        button {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #progressBar {
+            width: 100%;
+            background-color: #ddd;
+            display: none;
+        }
+        #progressBar div {
+            width: 0%;
+            height: 30px;
+            background-color: #4CAF50;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <h1>Создание ресурс-пака для Minecraft Bedrock</h1>
+    <p>Создано при поддержке группы в ВК КАРТОГРАФ - minecraft bedrock</p>
+    
+    <div class="form-group">
+        <label for="packName">Название ресурс-пака:</label>
+        <input type="text" id="packName" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="mp3Files">Выберите MP3-файлы (максимум 15):</label>
+        <input type="file" id="mp3Files" accept=".mp3" multiple>
+    </div>
+    
+    <div class="form-group">
+        <button id="createPack">Создать ресурс-пак</button>
+    </div>
+    
+    <div id="progressBar"><div></div></div>
+    
+    <div id="result"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script>
+        const availableNames = [
+            "mall.ogg", "mellohi.ogg", "otherside.ogg", "record_pigstep.ogg", "relic.ogg",
+            "stal.ogg", "strad.ogg", "wait.ogg", "ward.ogg", "5.ogg", "11.ogg",
+            "13.ogg", "blocks.ogg", "cat.ogg", "chirp.ogg"
+        ];
+
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        document.getElementById('mp3Files').addEventListener('change', function() {
+            if (this.files.length > 15) {
+                alert('Вы можете выбрать максимум 15 файлов.');
+                this.value = '';
+            }
+        });
+
+        document.getElementById('createPack').addEventListener('click', async function() {
+            const packName = document.getElementById('packName').value;
+            const mp3Files = document.getElementById('mp3Files').files;
+
+            if (!packName || mp3Files.length === 0) {
+                alert('Пожалуйста, введите название ресурс-пака и выберите MP3-файлы.');
+                return;
+            }
+
+            const progressBar = document.getElementById('progressBar');
+            const progressBarInner = progressBar.querySelector('div');
+            progressBar.style.display = 'block';
+            progressBarInner.style.width = '0%';
+            progressBarInner.textContent = '0%';
+
+            const zip = new JSZip();
+            const conversionLog = [];
+
+            // Создание manifest.json
+            const manifestData = {
+                format_version: 1,
+                header: {
+                    uuid: generateUUID(),
+                    name: packName,
+                    version: [0, 0, 1],
+                    description: "@kartograf"
+                },
+                modules: [
+                    {
+                        description: "@kartograf",
+                        version: [0, 0, 1],
+                        uuid: generateUUID(),
+                        type: "resources"
+                    }
+                ]
+            };
+            zip.file("manifest.json", JSON.stringify(manifestData, null, 2));
+
+            // Добавление пустого pack_icon.png
+            zip.file("pack_icon.png", "", {base64: true});
+
+            // Конвертация и добавление MP3 файлов
+            for (let i = 0; i < Math.min(mp3Files.length, availableNames.length); i++) {
+                const mp3File = mp3Files[i];
+                const newName = availableNames[i];
+                const arrayBuffer = await mp3File.arrayBuffer();
+                zip.file(`sounds/music/game/records/${newName}`, arrayBuffer);
+                conversionLog.push(`${mp3File.name} -> ${newName}`);
+
+                const progress = Math.round((i + 1) / Math.min(mp3Files.length, availableNames.length) * 100);
+                progressBarInner.style.width = `${progress}%`;
+                progressBarInner.textContent = `${progress}%`;
+            }
+
+            // Создание лога конвертации
+            zip.file(`${packName}_conversion_log.txt`, "Информация о переименовании файлов:\n\n" + conversionLog.join('\n'));
+
+            // Генерация и скачивание ZIP-архива
+            zip.generateAsync({type:"blob"}, function updateCallback(metadata) {
+                const progress = Math.round(metadata.percent);
+                progressBarInner.style.width = `${progress}%`;
+                progressBarInner.textContent = `${progress}%`;
+            }).then(function(content) {
+                saveAs(content, `${packName}.mcpack`);
+                document.getElementById('result').innerHTML = `Ресурс-пак '${packName}' успешно создан и скачан.`;
+                progressBar.style.display = 'none';
+            });
+        });
+    </script>
+</body>
+</html>
